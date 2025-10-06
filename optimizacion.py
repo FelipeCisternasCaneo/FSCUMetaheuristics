@@ -74,6 +74,8 @@ for clasificador in clasificadores:
         fscore_score_1           = []
         fscore_score_macro       = []
         fscore_score_weighted    = []
+        
+        print(f"Corrida {i} para algoritmo {clasificador}")
 
         for train_index, test_index in kf.split(datos,clases):
             # obtenemos los datos de entrenamiento y datos de testing del fold
@@ -95,7 +97,6 @@ for clasificador in clasificadores:
             # comparamos los resultados obtenidos entre las clases predichas y las clases originales de testing
             reporte = classification_report(y_test_fold, y_pred, output_dict=True)
             # obtenemos las métricas de desempeño
-            print(reporte)
             precision_score_0.append(reporte['0']['precision'])
             precision_score_1.append(reporte['1']['precision'])
             precision_score_macro.append(reporte['macro avg']['precision'])
@@ -129,4 +130,4 @@ for clasificador in clasificadores:
 
     resultados_df = pd.DataFrame(resultados)
     print(resultados_df)
-    resultados_df.to_csv(f'resultados_{clasificador}.csv', index=False)
+    resultados_df.to_csv(f'Resultados_Base/resultados_{clasificador}.csv', index=False)
