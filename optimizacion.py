@@ -170,4 +170,4 @@ for clasificador in clasificadores:
 
     resultados_df = pd.DataFrame(resultados)
     print(resultados_df)
-    resultados_df.to_csv(f'Resultados_Base/resultados_{clasificador}.csv', index=False)
+    resultados_df.to_csv(f'Resultados_Base/data_bruta/resultados_{clasificador}.csv', index=False)
