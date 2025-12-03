@@ -35,6 +35,14 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import GaussianNB   
     
     
+# Definimos explícitamente cuál es tu clase minoritaria
+# (Revisa tus datos: ¿es 0 o 1?)
+CLASE_MINORITARIA = 0
+
+# Creamos un "Scorer" personalizado
+# pos_label le dice a la métrica qué clase mirar
+scorer_minoritaria = make_scorer(recall_score, pos_label=CLASE_MINORITARIA)
+    
 def reporte_metricas(ejecucion, nombre, mh, y_true, y_pred, y_prob=None, pos_label=1):
 
     resultados_testing_generales = []
@@ -199,12 +207,18 @@ class seleccion_caracteristicas(Problem):
         elif clasificador == 'NaiveBayes':
             model = GaussianNB()
         
-        model.fit(X_train, y_train)
         
-        y_pred = model.predict(X_val)
-        
-        resultados_metricas = classification_report(y_val, y_pred, output_dict=True)
-        return resultados_metricas['0']['recall']
+        cv_strat = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    
+        # Usamos nuestro scorer personalizado
+        scores = cross_val_score(
+            model, 
+            X_train, 
+            y_train, 
+            cv=cv_strat, 
+            scoring=scorer_minoritaria # <--- Aquí está la clave
+        )
+        return scores.mean()
         
 #formato
 #lista de modelos
@@ -226,7 +240,7 @@ for mh in mhs:
         carpeta_clasificador.mkdir(parents=True, exist_ok=True)
         
         corridas = 1
-        while corridas <= 5:
+        while corridas <= 1:
             carpeta_corrida = Path(f"resultados/seleccion_caracteristicas/{mh}/{c}/{corridas}")
             carpeta_corrida.mkdir(parents=True, exist_ok=True)
         
@@ -290,6 +304,33 @@ for mh in mhs:
                 model = LogisticRegression(max_iter=10000, random_state=42)
             elif c == 'NaiveBayes':
                 model = GaussianNB()
+                
+            cv_strat = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    
+            # Usamos nuestro scorer personalizado
+            scores = cross_val_score(
+                model, 
+                X_train, 
+                y_train, 
+                cv=cv_strat, 
+                scoring=scorer_minoritaria # <--- Aquí está la clave
+            )
+            
+            reporte_entrenamiento = []        
+            reporte_entrenamiento.append({
+                "observacion": 'k-folds',
+                "valor": scores.tolist(),
+            })
+            reporte_entrenamiento.append({
+                "observacion": 'mean',
+                "valor": scores.mean(),
+            })
+            
+            reporte_entrenamiento_df = pd.DataFrame(reporte_entrenamiento)
+            reporte_entrenamiento_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{c}/{corridas}/reporte_entrenamiento_{c}_{mh}.csv', index=False)
+            
+            print(scores.mean())
+            
             
             model.fit(X_train, y_train)
             
