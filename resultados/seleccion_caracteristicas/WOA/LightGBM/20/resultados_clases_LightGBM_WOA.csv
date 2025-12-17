@@ -1,0 +1,13 @@
+class,metric,value
+0,presicion,1.0
+1,presicion,0.9958677685950413
+macro avg,presicion,0.9979338842975207
+weighted avg,presicion,0.9961055450390138
+0,recall,0.9320388349514563
+1,recall,1.0
+macro avg,recall,0.9660194174757282
+weighted avg,recall,0.9960893854748604
+0,f1-score,0.964824120603015
+1,f1-score,0.9979296066252588
+macro avg,f1-score,0.9813768636141369
+weighted avg,f1-score,0.9960246540776101

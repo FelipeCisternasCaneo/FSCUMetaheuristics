@@ -1,40 +1,22 @@
-from mealpy import FloatVar, TransferBoolVar, IntegerVar, StringVar, PSO, Problem, GWO, WOA
-from pathlib import Path
-
+import sys
+import argparse
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg') # Backend no interactivo vital
 import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import (
-    accuracy_score,
-    roc_auc_score,
-    recall_score,
-    precision_score,
-    f1_score,
-    cohen_kappa_score,
-    matthews_corrcoef,
-    ConfusionMatrixDisplay,
-    confusion_matrix,
-    classification_report,
-    make_scorer
-)
-
-from sklearn.model_selection import StratifiedKFold, cross_val_score, GridSearchCV, train_test_split
-from sklearn.base import clone
-from imblearn.pipeline import Pipeline
-from imblearn.over_sampling import SMOTE
-from imblearn.over_sampling import ADASYN
-from imblearn.under_sampling import RandomUnderSampler
-import time
-
+from pathlib import Path
+from mealpy import FloatVar, PSO, GWO, WOA, Problem
+from sklearn.metrics import recall_score, make_scorer, precision_score, accuracy_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef, confusion_matrix, ConfusionMatrixDisplay, classification_report
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
 import lightgbm as lgbm
-from sklearn import svm #svc.()
+from sklearn import svm
 from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import GaussianNB   
-    
-    
+from sklearn.naive_bayes import GaussianNB
+import gc
+
 # Definimos explícitamente cuál es tu clase minoritaria
 # (Revisa tus datos: ¿es 0 o 1?)
 CLASE_MINORITARIA = 0
@@ -42,8 +24,63 @@ CLASE_MINORITARIA = 0
 # Creamos un "Scorer" personalizado
 # pos_label le dice a la métrica qué clase mirar
 scorer_minoritaria = make_scorer(recall_score, pos_label=CLASE_MINORITARIA)
+
+# --- DEFINICIÓN DEL PROBLEMA ---
+class SeleccionCaracteristicas(Problem):
+    def __init__(self, bounds=None, minmax="max", data=None, **kwargs):
+        self.data = data
+        super().__init__(bounds, minmax, **kwargs)
+
+    def obj_func(self, x):
+        datos = self.data["datos"]
+        clases = self.data["clases"]
+        clasificador_nombre = self.data["clasificador"]
+        
+        # Decodificación determinista
+        selection = np.where(x > 0.5)[0]
+        
+        if len(selection) == 0:
+            return 0.0
+        datos_filtrados = datos.iloc[:, selection]
+        
+        # IMPORTANTE: Reducir overhead en obj_func
+        # Usar un split simple 80/20 dentro de la optimización es MUCHO más rápido que CV
+        # El CV (Cross Validation) déjalo solo para la validación final.
+        X_t, X_v, y_t, y_v = train_test_split(datos_filtrados, clases, test_size=0.2, stratify=clases, random_state=42)
+        
+        model = self._get_model(clasificador_nombre)
+        
+        cv_strat = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
     
-def reporte_metricas(ejecucion, nombre, mh, y_true, y_pred, y_prob=None, pos_label=1):
+        # Usamos nuestro scorer personalizado
+        scores = cross_val_score(
+            model, 
+            X_t, 
+            y_t, 
+            cv=cv_strat, 
+            scoring=scorer_minoritaria # <--- Aquí está la clave
+        )
+        return scores.mean()
+        
+        
+        # model.fit(X_t, y_t)
+        # y_pred = model.predict(X_v)
+        
+        # Optimizamos Recall de la clase minoritaria (0)
+        # return recall_score(y_v, y_pred, pos_label=0)
+
+    def _get_model(self, name):
+        # Instanciar modelos ligeros para la optimización
+        if name == 'KNN': return KNeighborsClassifier()
+        if name == 'RandomForest': return RandomForestClassifier(random_state=42, n_jobs=-1) # Pocos arboles para ser rápido
+        if name == 'LightGBM': return lgbm.LGBMClassifier(random_state=42, verbose=-1)
+        if name == 'SVM': return svm.SVC(kernel="linear", random_state=42)
+        if name == 'LogisticRegression': return LogisticRegression(max_iter=10000, random_state=42)
+        if name == 'NaiveBayes': return GaussianNB()
+        return None
+
+# --- FUNCIÓN DE REPORTE ---
+def generar_reporte(ejecucion, mh, nombre, y_true, y_pred, pos_label=1):
 
     resultados_testing_generales = []
     resultados_testing_generales.append({
@@ -62,17 +99,6 @@ def reporte_metricas(ejecucion, nombre, mh, y_true, y_pred, y_prob=None, pos_lab
         "metric": 'F1 Score',
         "value": f1_score(y_true, y_pred, pos_label=pos_label)
     })
-
-    if y_prob is not None:
-        resultados_testing_generales.append({
-            "metric": 'AUC',
-            "value": roc_auc_score(y_true, y_prob)
-        })
-    else:
-        resultados_testing_generales.append({
-            "metric": 'AUC',
-            "value": None
-        })
     resultados_testing_generales.append({
         "metric": 'Cohen\'s Kappa',
         "value": cohen_kappa_score(y_true, y_pred)
@@ -95,7 +121,7 @@ def reporte_metricas(ejecucion, nombre, mh, y_true, y_pred, y_prob=None, pos_lab
     plt.title(f"{nombre} Confusion Matrix")
     plt.tight_layout()
     plt.savefig(f'./resultados/seleccion_caracteristicas/{mh}/{nombre}/{ejecucion}/confusion_matrix_{nombre}_{mh}.png')
-    plt.close()
+    plt.close("all")
 
     resultados_testing_clases = []
     
@@ -170,173 +196,110 @@ def reporte_metricas(ejecucion, nombre, mh, y_true, y_pred, y_prob=None, pos_lab
     
     resultados_testing_clases_df = pd.DataFrame(resultados_testing_clases)
     resultados_testing_clases_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{nombre}/{ejecucion}/resultados_clases_{nombre}_{mh}.csv', index=False)
+
+# --- BLOQUE PRINCIPAL ---
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mh", type=str, required=True)
+    parser.add_argument("--clf", type=str, required=True)
+    parser.add_argument("--corrida", type=str, required=True)
+    args = parser.parse_args()
+
+    mh = args.mh
+    clf = args.clf
+    ejecucion = args.corrida
+
+    print(f"--- WORKER INICIADO: {mh} + {clf} + corrida:{ejecucion} ---")
     
-class seleccion_caracteristicas(Problem):
+    # CARGA DE DATOS (Se hace fresca cada vez)
+    try:
+        df_final = pd.read_csv('datosFSCUV4_post2012PROCESADO.csv', index_col=False)
+        if 'id' in df_final.columns: df_final = df_final.drop('id', axis=1)
+        X = df_final.drop(columns="dejo_declarar")
+        y = df_final["dejo_declarar"]
+    except Exception as e:
+        print(f"Error cargando datos: {e}")
+        sys.exit(1)
+
+
+    # CONFIGURAR MEALPY
+    data_dict = {"datos": X, "clases": y, "clasificador": clf}
+    bounds = [FloatVar(lb=[0.0]*X.shape[1], ub=[1.0]*X.shape[1], name="features")]
+    problem = SeleccionCaracteristicas(bounds=bounds, minmax="max", data=data_dict)
+
+    model_mh = None
+    if mh == 'PSO': model_mh = PSO.OriginalPSO(epoch=100, pop_size=10) # Ajusta epoch/pop
+    elif mh == 'GWO': model_mh = GWO.OriginalGWO(epoch=100, pop_size=10)
+    elif mh == 'WOA': model_mh = WOA.OriginalWOA(epoch=100, pop_size=10)
+
+    # RESOLVER
+    model_mh.solve(problem)
     
-    def __init__(self, bounds=None, minmax="max", data=None, **kwargs):
-        self.data = data
-        super().__init__(bounds, minmax, **kwargs)
+    # VALIDACIÓN FINAL (Aquí sí usamos el modelo robusto)
+    best_mask = model_mh.g_best.solution > 0.5
+    selection = np.where(best_mask)[0]
+    
+    if len(selection) > 0:
+    
+        soluciones_reporte = []        
+        soluciones_reporte.append({
+            "solucion": 'continua',
+            "valor": model_mh.g_best.solution.tolist(),
+        })
+        soluciones_reporte.append({
+            "solucion": 'binaria',
+            "valor": best_mask.tolist(),
+        })
+        soluciones_reporte_df = pd.DataFrame(soluciones_reporte)
+        soluciones_reporte_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{clf}/{ejecucion}/solucion_{clf}_{mh}.csv', index=False)
         
-    def obj_func(self, x):
+        X_filt = X.iloc[:, selection]
+        X_tr, X_val, y_tr, y_val = train_test_split(X_filt, y, test_size=0.2, stratify=y, random_state=42)
         
-        datos = self.data["datos"]
-        clases = self.data["clases"]
-        clasificador = self.data["clasificador"]
-        x_decoded = x > 0.5
-        # x_decoded es un array booleano, np.where funciona igual
-        selection = np.where(x_decoded)[0]
-        # Validación de seguridad: Si no seleccionó ninguna, penalizamos fuerte
-        if len(selection) == 0:
-            return 0.0 # El peor caso (Recall 0 -> fitness 1)
-        datos_filtrados = datos.iloc[:, selection]
-        
-        X_train, X_val, y_train, y_val = train_test_split(datos_filtrados, clases, test_size=0.2, stratify=clases, random_state=42)
-        
-        model = None 
-        
-        if clasificador == 'KNN':
-            model = KNeighborsClassifier()
-        elif clasificador == 'RandomForest':
-            model = RandomForestClassifier(random_state=42)
-        elif clasificador == 'LightGBM':
-            model = lgbm.LGBMClassifier(random_state=42, verbose=-1)
-        elif clasificador == 'SVM':
-            model = svm.SVC(kernel="linear",random_state=42)
-        elif clasificador == 'LogisticRegression':
-            model = LogisticRegression(max_iter=10000, random_state=42)
-        elif clasificador == 'NaiveBayes':
-            model = GaussianNB()
-        
-        
+        # Modelo final robusto
+        final_model = None 
+                
+        if clf == 'KNN':
+            final_model = KNeighborsClassifier()
+        elif clf == 'RandomForest':
+            final_model = RandomForestClassifier(random_state=42)
+        elif clf == 'LightGBM':
+            final_model = lgbm.LGBMClassifier(random_state=42, verbose=-1)
+        elif clf == 'SVM':
+            final_model = svm.SVC(kernel="linear",random_state=42)
+        elif clf == 'LogisticRegression':
+            final_model = LogisticRegression(max_iter=10000, random_state=42)
+        elif clf == 'NaiveBayes':
+            final_model = GaussianNB()
+            
         cv_strat = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
-    
+
         # Usamos nuestro scorer personalizado
         scores = cross_val_score(
-            model, 
-            X_train, 
-            y_train, 
+            final_model, 
+            X_tr, 
+            y_tr, 
             cv=cv_strat, 
             scoring=scorer_minoritaria # <--- Aquí está la clave
         )
-        return scores.mean()
         
-#formato
-#lista de modelos
-clasificadores = ['KNN', 'RandomForest', 'LightGBM', 'SVM', 'LogisticRegression', 'NaiveBayes']
-mhs = ['PSO','GWO','WOA']
-df_final = pd.read_csv('datosFSCUV4_post2012PROCESADO.csv', engine= 'c', index_col=False)
-df_final = df_final.drop('id', axis=1)
-
-print(df_final["dejo_declarar"].value_counts())
-
-X = df_final.drop(columns="dejo_declarar")
-y = df_final["dejo_declarar"]
-
-for mh in mhs:
-    carpeta_mh = Path(f"resultados/seleccion_caracteristicas/{mh}")
-    carpeta_mh.mkdir(parents=True, exist_ok=True)
-    for c in clasificadores:
-        carpeta_clasificador = Path(f"resultados/seleccion_caracteristicas/{mh}/{c}")
-        carpeta_clasificador.mkdir(parents=True, exist_ok=True)
+        reporte_entrenamiento = []        
+        reporte_entrenamiento.append({
+            "observacion": 'k-folds',
+            "valor": scores.tolist(),
+        })
+        reporte_entrenamiento.append({
+            "observacion": 'mean',
+            "valor": scores.mean(),
+        })
         
-        corridas = 1
-        while corridas <= 1:
-            carpeta_corrida = Path(f"resultados/seleccion_caracteristicas/{mh}/{c}/{corridas}")
-            carpeta_corrida.mkdir(parents=True, exist_ok=True)
+        reporte_entrenamiento_df = pd.DataFrame(reporte_entrenamiento)
+        reporte_entrenamiento_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{clf}/{ejecucion}/reporte_entrenamiento_{clf}_{mh}.csv', index=False)
         
-            data = {
-                "datos": X,
-                "clases": y,
-                "clasificador": c
-            }
-
-            my_bounds = [   
-                # seleccion de características
-                FloatVar(lb=[0.0] * X.shape[1], ub=[1.0] * X.shape[1], name="features"),
-            ]
-
-
-            problem = seleccion_caracteristicas(bounds=my_bounds, minmax="max", data=data)
-            optimizador = None
-            if mh == 'PSO':
-                optimizador = PSO.OriginalPSO(epoch=10, pop_size=5)
-            elif mh == 'GWO':
-                optimizador = GWO.OriginalGWO(epoch=10, pop_size=5)
-            elif mh == 'WOA':
-                optimizador = WOA.OriginalWOA(epoch=10, pop_size=5)
-            optimizador.solve(problem)
+        final_model.fit(X_tr, y_tr)
+        y_pred = final_model.predict(X_val)
         
-            
-            soluciones_reporte = []        
-            best = optimizador.g_best.solution
-            soluciones_reporte.append({
-                "solucion": 'continua',
-                "valor": best.tolist(),
-            })
-            x_decoded = best > 0.5
-            soluciones_reporte.append({
-                "solucion": 'binaria',
-                "valor": x_decoded.tolist(),
-            })
-            
-            soluciones_reporte_df = pd.DataFrame(soluciones_reporte)
-            soluciones_reporte_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{c}/{corridas}/solucion_{c}_{mh}.csv', index=False)
-            
-            
-            
-            # x_decoded es un array booleano, np.where funciona igual
-            selection = np.where(x_decoded)[0]
-            X_filtrados = X.iloc[:, selection]
-            
-            X_train, X_val, y_train, y_val = train_test_split(X_filtrados, y, test_size=0.2, stratify=y, random_state=42)
-            
-            model = None 
-                
-            if c == 'KNN':
-                model = KNeighborsClassifier()
-            elif c == 'RandomForest':
-                model = RandomForestClassifier(random_state=42)
-            elif c == 'LightGBM':
-                model = lgbm.LGBMClassifier(random_state=42, verbose=-1)
-            elif c == 'SVM':
-                model = svm.SVC(kernel="linear",random_state=42)
-            elif c == 'LogisticRegression':
-                model = LogisticRegression(max_iter=10000, random_state=42)
-            elif c == 'NaiveBayes':
-                model = GaussianNB()
-                
-            cv_strat = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
-    
-            # Usamos nuestro scorer personalizado
-            scores = cross_val_score(
-                model, 
-                X_train, 
-                y_train, 
-                cv=cv_strat, 
-                scoring=scorer_minoritaria # <--- Aquí está la clave
-            )
-            
-            reporte_entrenamiento = []        
-            reporte_entrenamiento.append({
-                "observacion": 'k-folds',
-                "valor": scores.tolist(),
-            })
-            reporte_entrenamiento.append({
-                "observacion": 'mean',
-                "valor": scores.mean(),
-            })
-            
-            reporte_entrenamiento_df = pd.DataFrame(reporte_entrenamiento)
-            reporte_entrenamiento_df.to_csv(f'./resultados/seleccion_caracteristicas/{mh}/{c}/{corridas}/reporte_entrenamiento_{c}_{mh}.csv', index=False)
-            
-            print(scores.mean())
-            
-            
-            model.fit(X_train, y_train)
-            
-            y_pred = model.predict(X_val)
-            
-            reporte_metricas(corridas, c, mh, y_val, y_pred, y_prob=None, pos_label=1)
-            
-            corridas+=1
-    
+        generar_reporte(ejecucion, mh, clf, y_val, y_pred)
+        print(f"--- WORKER FINALIZADO CON ÉXITO: {mh} + {clf} ---")
+    else:
+        print("Ninguna característica seleccionada.")

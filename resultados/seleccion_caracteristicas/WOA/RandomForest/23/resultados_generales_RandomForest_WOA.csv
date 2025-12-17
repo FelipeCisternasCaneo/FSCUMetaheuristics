@@ -1,0 +1,7 @@
+metric,value
+Accuracy,0.9810055865921787
+Precision,0.9824868651488616
+Recall,0.997628927089508
+F1 Score,0.99
+Cohen's Kappa,0.801330556444189
+Matthews CorrCoef,0.810741460354144
