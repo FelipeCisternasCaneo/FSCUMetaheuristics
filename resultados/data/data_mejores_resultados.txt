@@ -1,0 +1,9 @@
+el mejor resultado para GWO KNN es 0.912621359223301 en la ejecucion 1
+el mejor resultado para GWO LightGBM es 0.9611650485436892 en la ejecucion 2
+el mejor resultado para GWO RandomForest es 0.9902912621359224 en la ejecucion 30
+el mejor resultado para PSO KNN es 0.6796116504854369 en la ejecucion 7
+el mejor resultado para PSO LightGBM es 0.9514563106796116 en la ejecucion 1
+el mejor resultado para PSO RandomForest es 0.9320388349514565 en la ejecucion 22
+el mejor resultado para WOA KNN es 0.7087378640776699 en la ejecucion 31
+el mejor resultado para WOA LightGBM es 0.970873786407767 en la ejecucion 24
+el mejor resultado para WOA RandomForest es 0.912621359223301 en la ejecucion 14

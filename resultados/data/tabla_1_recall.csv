@@ -1,0 +1,10 @@
+mh,clasificador,best,avg,std
+GWO,KNN,0.999,0.994,0.006
+GWO,LightGBM,0.999,0.998,0.001
+GWO,RandomForest,0.999,0.997,0.002
+PSO,KNN,0.992,0.982,0.004
+PSO,LightGBM,1.0,0.999,0.001
+PSO,RandomForest,0.999,0.998,0.001
+WOA,KNN,1.0,0.978,0.018
+WOA,LightGBM,1.0,0.999,0.001
+WOA,RandomForest,0.999,0.995,0.004
