@@ -4,7 +4,7 @@ import scikit_posthocs as sp
 
 # === 1. Cargar y preparar datos ===
 # Asegúrate de que el archivo esté en el mismo directorio
-nombre = 'data_test_estadistico_1'
+nombre = 'data_test_estadistico_0'
 df = pd.read_csv(f"resultados/data/{nombre}.csv")  
 df["repetition"] = df.groupby("MH").cumcount()
 
@@ -58,10 +58,11 @@ for mh1 in mhs:
             # Interpretación direccional para problema de minimización
             if p_wilcoxon < 0.05:
                     conclusion = f"{mh1} is better than {mh2}"
+                    notacion_cientifica = f'{p_wilcoxon:.2e}'
                     wilcoxon_results.append({
                         "MH1": mh1,
                         "MH2": mh2,
-                        "p-value": round(p_wilcoxon, 4),
+                        "p-value": notacion_cientifica,
                         "conclusion": conclusion
                     })
             # else:
